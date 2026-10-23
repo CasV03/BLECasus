@@ -5,11 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Slimme pakketbox</title>
-
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       font-family: Arial, sans-serif;
@@ -29,9 +26,7 @@
       text-align: center;
     }
 
-    h1 {
-      font-size: 27px;
-    }
+    h1 { font-size: 27px; }
 
     button {
       width: 100%;
@@ -50,17 +45,9 @@
       cursor: not-allowed;
     }
 
-    #connect {
-      background: #3157c8;
-    }
-
-    #open {
-      background: #16834a;
-    }
-
-    #close {
-      background: #b83232;
-    }
+    #connect { background: #3157c8; }
+    #open { background: #16834a; }
+    #close { background: #b83232; }
 
     #status {
       background: #eef1f5;
@@ -77,7 +64,6 @@
     }
   </style>
 </head>
-
 <body>
   <main>
     <h1>📦 Slimme pakketbox</h1>
@@ -139,17 +125,17 @@
 
     async function connectBLE() {
       if (!navigator.bluetooth) {
-        showStatus(
-          "Web Bluetooth niet beschikbaar. Gebruik Chrome of Edge op je pc."
-        );
+        showStatus("Web Bluetooth is niet beschikbaar in deze browser.");
         return;
       }
 
       try {
-        showStatus("Verbinding maken...");
+        showStatus("Bluetooth-apparaat kiezen...");
 
         device = await navigator.bluetooth.requestDevice({
-          filters: [{ name: "CESP32" }],
+          filters: [{
+            services: [SERVICE_UUID]
+          }],
           optionalServices: [SERVICE_UUID]
         });
 
@@ -157,6 +143,8 @@
           "gattserverdisconnected",
           disconnect
         );
+
+        showStatus("Verbinden met " + (device.name || "apparaat") + "...");
 
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID);
@@ -171,11 +159,9 @@
           statusCharacteristic.addEventListener(
             "characteristicvaluechanged",
             event => {
-              const value = new TextDecoder().decode(
-                event.target.value
+              showStatus(
+                new TextDecoder().decode(event.target.value)
               );
-
-              showStatus(value);
             }
           );
 
@@ -190,20 +176,18 @@
           const value = await statusCharacteristic.readValue();
           showStatus(new TextDecoder().decode(value));
         } catch (error) {
-          showStatus("Verbonden met CESP32");
+          showStatus("Verbonden met " + (device.name || "ESP32"));
         }
 
       } catch (error) {
         console.error(error);
-        showStatus("Verbinding mislukt");
+        showStatus("Verbinding mislukt: " + error.message);
         setConnected(false);
       }
     }
 
     async function sendCommand(command) {
-      if (!commandCharacteristic || busy) {
-        return;
-      }
+      if (!commandCharacteristic || busy) return;
 
       busy = true;
       openButton.disabled = true;
@@ -220,13 +204,13 @@
 
         showStatus(
           command === "OPEN"
-            ? "Pakketbox open"
-            : "Pakketbox gesloten"
+            ? "Commando OPEN verstuurd"
+            : "Commando CLOSE verstuurd"
         );
 
       } catch (error) {
         console.error(error);
-        showStatus("Kon het commando niet versturen");
+        showStatus("Commando mislukt: " + error.message);
       } finally {
         busy = false;
 
@@ -238,14 +222,8 @@
     }
 
     connectButton.addEventListener("click", connectBLE);
-
-    openButton.addEventListener("click", () => {
-      sendCommand("OPEN");
-    });
-
-    closeButton.addEventListener("click", () => {
-      sendCommand("CLOSE");
-    });
+    openButton.addEventListener("click", () => sendCommand("OPEN"));
+    closeButton.addEventListener("click", () => sendCommand("CLOSE"));
   </script>
 </body>
 </html>
