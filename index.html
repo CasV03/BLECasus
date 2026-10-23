@@ -1,0 +1,251 @@
+
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Slimme pakketbox</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #f1f4f8;
+      margin: 0;
+      padding: 24px 16px;
+      color: #202938;
+    }
+
+    main {
+      max-width: 400px;
+      margin: 30px auto;
+      background: white;
+      padding: 24px;
+      border-radius: 22px;
+      box-shadow: 0 6px 24px #00000012;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 27px;
+    }
+
+    button {
+      width: 100%;
+      padding: 18px;
+      margin: 9px 0;
+      border: none;
+      border-radius: 12px;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    #connect {
+      background: #3157c8;
+    }
+
+    #open {
+      background: #16834a;
+    }
+
+    #close {
+      background: #b83232;
+    }
+
+    #status {
+      background: #eef1f5;
+      padding: 14px;
+      border-radius: 10px;
+      margin: 18px 0;
+      overflow-wrap: anywhere;
+    }
+
+    .hint {
+      font-size: 13px;
+      color: #667085;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>📦 Slimme pakketbox</h1>
+    <p>Bedien je pakketbox via Bluetooth</p>
+
+    <button id="connect">VERBINDEN VIA BLE</button>
+
+    <div id="status" role="status" aria-live="polite">
+      Niet verbonden
+    </div>
+
+    <button id="open" disabled>🔓 OPENEN</button>
+    <button id="close" disabled>🔒 SLUITEN</button>
+
+    <p class="hint">
+      Verbind eerst met de ESP32 om de pakketbox te bedienen.
+    </p>
+  </main>
+
+  <script>
+    const SERVICE_UUID =
+      "19b10000-e8f2-537e-4f6c-d104768a1214";
+
+    const COMMAND_UUID =
+      "19b10001-e8f2-537e-4f6c-d104768a1214";
+
+    const STATUS_UUID =
+      "19b10002-e8f2-537e-4f6c-d104768a1214";
+
+    const connectButton = document.getElementById("connect");
+    const openButton = document.getElementById("open");
+    const closeButton = document.getElementById("close");
+    const statusElement = document.getElementById("status");
+
+    let device = null;
+    let commandCharacteristic = null;
+    let statusCharacteristic = null;
+    let busy = false;
+
+    function showStatus(message) {
+      statusElement.textContent = message;
+    }
+
+    function setConnected(connected) {
+      openButton.disabled = !connected;
+      closeButton.disabled = !connected;
+
+      connectButton.textContent = connected
+        ? "VERBONDEN MET CESP32"
+        : "VERBINDEN VIA BLE";
+    }
+
+    function disconnect() {
+      commandCharacteristic = null;
+      statusCharacteristic = null;
+      setConnected(false);
+      showStatus("Niet verbonden");
+    }
+
+    async function connectBLE() {
+      if (!navigator.bluetooth) {
+        showStatus(
+          "Web Bluetooth niet beschikbaar. Gebruik Chrome of Edge op je pc."
+        );
+        return;
+      }
+
+      try {
+        showStatus("Verbinding maken...");
+
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: "CESP32" }],
+          optionalServices: [SERVICE_UUID]
+        });
+
+        device.addEventListener(
+          "gattserverdisconnected",
+          disconnect
+        );
+
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+
+        commandCharacteristic =
+          await service.getCharacteristic(COMMAND_UUID);
+
+        statusCharacteristic =
+          await service.getCharacteristic(STATUS_UUID);
+
+        try {
+          statusCharacteristic.addEventListener(
+            "characteristicvaluechanged",
+            event => {
+              const value = new TextDecoder().decode(
+                event.target.value
+              );
+
+              showStatus(value);
+            }
+          );
+
+          await statusCharacteristic.startNotifications();
+        } catch (error) {
+          console.log("Statusmeldingen niet beschikbaar:", error);
+        }
+
+        setConnected(true);
+
+        try {
+          const value = await statusCharacteristic.readValue();
+          showStatus(new TextDecoder().decode(value));
+        } catch (error) {
+          showStatus("Verbonden met CESP32");
+        }
+
+      } catch (error) {
+        console.error(error);
+        showStatus("Verbinding mislukt");
+        setConnected(false);
+      }
+    }
+
+    async function sendCommand(command) {
+      if (!commandCharacteristic || busy) {
+        return;
+      }
+
+      busy = true;
+      openButton.disabled = true;
+      closeButton.disabled = true;
+
+      try {
+        const data = new TextEncoder().encode(command);
+
+        if (commandCharacteristic.writeValueWithResponse) {
+          await commandCharacteristic.writeValueWithResponse(data);
+        } else {
+          await commandCharacteristic.writeValue(data);
+        }
+
+        showStatus(
+          command === "OPEN"
+            ? "Pakketbox open"
+            : "Pakketbox gesloten"
+        );
+
+      } catch (error) {
+        console.error(error);
+        showStatus("Kon het commando niet versturen");
+      } finally {
+        busy = false;
+
+        const connected =
+          device && device.gatt && device.gatt.connected;
+
+        setConnected(Boolean(connected));
+      }
+    }
+
+    connectButton.addEventListener("click", connectBLE);
+
+    openButton.addEventListener("click", () => {
+      sendCommand("OPEN");
+    });
+
+    closeButton.addEventListener("click", () => {
+      sendCommand("CLOSE");
+    });
+  </script>
+</body>
+</html>
